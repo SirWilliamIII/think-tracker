@@ -367,7 +367,7 @@
           </div>
         `
 
-          renderSessionList('recent-sessions', sessions)
+          renderSessionList('recent-sessions', sessions.sessions || [])
         } catch (err) {
           console.error('Failed to load dashboard:', err)
         }
@@ -376,8 +376,8 @@
       // Sessions
       async function loadSessions() {
         try {
-          const sessions = await fetch(`${API}/sessions`).then((r) => r.json())
-          renderSessionList('all-sessions', sessions)
+          const data = await fetch(`${API}/sessions`).then((r) => r.json())
+          renderSessionList('all-sessions', data.sessions || [])
         } catch (err) {
           console.error('Failed to load sessions:', err)
         }
@@ -426,7 +426,7 @@
           </div>
         `
 
-          renderMessages('session-messages', messages)
+          renderMessages('session-messages', messages.messages || [])
           showPanel('session-detail')
         } catch (err) {
           console.error('Failed to load session:', err)
@@ -506,10 +506,11 @@
         container.innerHTML = '<div class="loading">Searching...</div>'
 
         try {
-          const results = await fetch(
+          const data = await fetch(
             `${API}/search?q=${encodeURIComponent(query)}`
           ).then((r) => r.json())
-          if (!results || results.length === 0) {
+          const results = data.results || []
+          if (results.length === 0) {
             container.innerHTML = '<div class="empty-state">No results found</div>'
             return
           }
@@ -525,13 +526,13 @@
                 r.created_at
               ).toLocaleString()}</span>
             </div>
-            <div>${highlightMatch(r.content, query)}</div>
+            <div>${r.content_snippet || escapeHtml(r.content) || ''}</div>
             ${
-              r.thinking_content
+              r.thinking_snippet || r.thinking_content
                 ? `
               <div class="thinking-block" style="margin-top: 8px;">
                 <h4>🧠 Thinking Match</h4>
-                <pre>${highlightMatch(r.thinking_content, query)}</pre>
+                <pre>${r.thinking_snippet || escapeHtml(r.thinking_content) || ''}</pre>
               </div>
             `
                 : ''
