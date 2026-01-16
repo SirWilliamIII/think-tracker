@@ -78,7 +78,12 @@ export interface CaptureMessageInput {
   role: 'user' | 'assistant' | 'system'
   content: string
   thinking_content?: string
+  thinking_text?: string | string[]
+  thinking?: string | string[]
+  thoughts?: string | string[]
   thinking_tokens?: number
+  thinking_token_count?: number
+  thoughts_token_count?: number
   model?: string
   input_tokens?: number
   output_tokens?: number
