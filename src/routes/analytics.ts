@@ -1,51 +1,40 @@
 import { Router, Request, Response } from 'express'
 import { getOverallStats, getDailyStats, getToolUsageStats } from '../db/index.js'
-import type {} from '../types/index.js'
+import { sendSuccess, sendError } from '../utils/api-response.js'
+import { VALIDATION } from '../utils/constants.js'
 
 const router = Router()
 
-/**
- * GET /api/analytics/overview
- * Get overall usage statistics
- */
-router.get('/overview', async (req: Request, res: Response) => {
+router.get('/overview', async (_req: Request, res: Response) => {
   try {
     const stats = await getOverallStats()
-    res.json(stats)
+    sendSuccess(res, { stats })
   } catch (error) {
-    console.error('Error fetching overview stats:', error)
-    res.status(500).json({ error: 'Failed to fetch statistics' })
+    sendError(res, error, 'fetching overview stats')
   }
 })
 
-/**
- * GET /api/analytics/daily
- * Get daily activity statistics
- */
 router.get('/daily', async (req: Request, res: Response) => {
   try {
     const { days = '30' } = req.query
-    const numDays = Math.min(parseInt(days as string, 10) || 30, 365)
+    const numDays = Math.min(
+      parseInt(days as string, 10) || 30,
+      VALIDATION.MAX_DAILY_STATS_DAYS
+    )
 
     const stats = await getDailyStats(numDays)
-    res.json(stats)
+    sendSuccess(res, { stats })
   } catch (error) {
-    console.error('Error fetching daily stats:', error)
-    res.status(500).json({ error: 'Failed to fetch daily statistics' })
+    sendError(res, error, 'fetching daily stats')
   }
 })
 
-/**
- * GET /api/analytics/tools
- * Get tool usage statistics
- */
-router.get('/tools', async (req: Request, res: Response) => {
+router.get('/tools', async (_req: Request, res: Response) => {
   try {
     const stats = await getToolUsageStats()
-    res.json(stats)
+    sendSuccess(res, { stats })
   } catch (error) {
-    console.error('Error fetching tool stats:', error)
-    res.status(500).json({ error: 'Failed to fetch tool statistics' })
+    sendError(res, error, 'fetching tool stats')
   }
 })
 

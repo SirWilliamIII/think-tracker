@@ -12,18 +12,29 @@ import {
   getOverallStats,
   getSessionStats
 } from './db/index.js'
+import { mcpSuccess, mcpError, mcpNotFound } from './utils/mcp-response.js'
+import { hasMore } from './utils/api-response.js'
+import { VALIDATION, PAGINATION } from './utils/constants.js'
+
+// =============================================================================
+// Schema Definitions
+// =============================================================================
 
 const CreateSessionSchema = z
   .object({
-    name: z.string().min(1).max(255).describe('Name for this coding session'),
+    name: z
+      .string()
+      .min(1)
+      .max(VALIDATION.SESSION_NAME_MAX_LENGTH)
+      .describe('Name for this coding session'),
     project_path: z.string().optional().describe('Path to the project directory'),
     metadata: z.record(z.unknown()).optional().describe('Additional metadata')
   })
   .strict()
 
-const EndSessionSchema = z
+const SessionIdSchema = z
   .object({
-    session_id: z.string().uuid().describe('UUID of the session to end')
+    session_id: z.string().uuid().describe('UUID of the session')
   })
   .strict()
 
@@ -84,34 +95,37 @@ const CaptureMessageSchema = z
   })
   .strict()
 
-const GetSessionSchema = z
-  .object({
-    session_id: z.string().uuid().describe('UUID of the session')
-  })
-  .strict()
-
 const ListSessionsSchema = z
   .object({
-    limit: z.number().int().min(1).max(100).default(50),
-    offset: z.number().int().min(0).default(0)
+    limit: z.number().int().min(1).max(PAGINATION.MAX_LIMIT).default(PAGINATION.DEFAULT_LIMIT),
+    offset: z.number().int().min(0).default(PAGINATION.DEFAULT_OFFSET)
   })
   .strict()
 
 const GetMessagesSchema = z
   .object({
     session_id: z.string().uuid().describe('UUID of the session'),
-    limit: z.number().int().min(1).max(500).default(100),
-    offset: z.number().int().min(0).default(0)
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(PAGINATION.MESSAGES_MAX_LIMIT)
+      .default(PAGINATION.MESSAGES_DEFAULT_LIMIT),
+    offset: z.number().int().min(0).default(PAGINATION.DEFAULT_OFFSET)
   })
   .strict()
 
 const SearchSchema = z
   .object({
-    query: z.string().min(2).max(500).describe('Search query'),
+    query: z
+      .string()
+      .min(VALIDATION.SEARCH_QUERY_MIN_LENGTH)
+      .max(VALIDATION.SEARCH_QUERY_MAX_LENGTH)
+      .describe('Search query'),
     session_id: z.string().uuid().optional(),
     role: z.enum(['user', 'assistant', 'system']).optional(),
-    limit: z.number().int().min(1).max(100).default(50),
-    offset: z.number().int().min(0).default(0),
+    limit: z.number().int().min(1).max(PAGINATION.MAX_LIMIT).default(PAGINATION.DEFAULT_LIMIT),
+    offset: z.number().int().min(0).default(PAGINATION.DEFAULT_OFFSET),
     search_thinking: z.boolean().default(true)
   })
   .strict()
@@ -122,7 +136,15 @@ const GetStatsSchema = z
   })
   .strict()
 
+// =============================================================================
+// Server Setup
+// =============================================================================
+
 const server = new McpServer({ name: 'claude-think-tracker', version: '1.0.0' })
+
+// =============================================================================
+// Tool Registrations
+// =============================================================================
 
 server.registerTool(
   'tracker_create_session',
@@ -140,21 +162,9 @@ server.registerTool(
   async (params: z.infer<typeof CreateSessionSchema>) => {
     try {
       const session = await createSession(params)
-      return {
-        content: [
-          { type: 'text', text: JSON.stringify({ success: true, session }, null, 2) }
-        ]
-      }
+      return mcpSuccess({ success: true, session })
     } catch (error) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Error: ${error instanceof Error ? error.message : String(error)}`
-          }
-        ],
-        isError: true
-      }
+      return mcpError(error)
     }
   }
 )
@@ -164,7 +174,7 @@ server.registerTool(
   {
     title: 'End Tracking Session',
     description: 'Mark a tracking session as ended.',
-    inputSchema: EndSessionSchema,
+    inputSchema: SessionIdSchema,
     annotations: {
       readOnlyHint: false,
       destructiveHint: false,
@@ -172,33 +182,13 @@ server.registerTool(
       openWorldHint: false
     }
   },
-  async (params: z.infer<typeof EndSessionSchema>) => {
+  async (params: z.infer<typeof SessionIdSchema>) => {
     try {
       const session = await endSession(params.session_id)
-      if (!session)
-        return { content: [{ type: 'text', text: 'Session not found' }], isError: true }
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              { success: true, session_id: session.id, ended_at: session.ended_at },
-              null,
-              2
-            )
-          }
-        ]
-      }
+      if (!session) return mcpNotFound('Session')
+      return mcpSuccess({ success: true, session_id: session.id, ended_at: session.ended_at })
     } catch (error) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Error: ${error instanceof Error ? error.message : String(error)}`
-          }
-        ],
-        isError: true
-      }
+      return mcpError(error)
     }
   }
 )
@@ -219,32 +209,13 @@ server.registerTool(
   async (params: z.infer<typeof CaptureMessageSchema>) => {
     try {
       const message = await captureMessage(params)
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              {
-                success: true,
-                message_id: message.id,
-                thinking_tokens: message.thinking_tokens
-              },
-              null,
-              2
-            )
-          }
-        ]
-      }
+      return mcpSuccess({
+        success: true,
+        message_id: message.id,
+        thinking_tokens: message.thinking_tokens
+      })
     } catch (error) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Error: ${error instanceof Error ? error.message : String(error)}`
-          }
-        ],
-        isError: true
-      }
+      return mcpError(error)
     }
   }
 )
@@ -254,7 +225,7 @@ server.registerTool(
   {
     title: 'Get Session',
     description: 'Retrieve details of a specific tracking session.',
-    inputSchema: GetSessionSchema,
+    inputSchema: SessionIdSchema,
     annotations: {
       readOnlyHint: true,
       destructiveHint: false,
@@ -262,22 +233,13 @@ server.registerTool(
       openWorldHint: false
     }
   },
-  async (params: z.infer<typeof GetSessionSchema>) => {
+  async (params: z.infer<typeof SessionIdSchema>) => {
     try {
       const session = await getSession(params.session_id)
-      if (!session)
-        return { content: [{ type: 'text', text: 'Session not found' }], isError: true }
-      return { content: [{ type: 'text', text: JSON.stringify(session, null, 2) }] }
+      if (!session) return mcpNotFound('Session')
+      return mcpSuccess(session)
     } catch (error) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Error: ${error instanceof Error ? error.message : String(error)}`
-          }
-        ],
-        isError: true
-      }
+      return mcpError(error)
     }
   }
 )
@@ -298,31 +260,12 @@ server.registerTool(
   async (params: z.infer<typeof ListSessionsSchema>) => {
     try {
       const result = await listSessions(params.limit, params.offset)
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              {
-                ...result,
-                has_more: result.total > params.offset + result.sessions.length
-              },
-              null,
-              2
-            )
-          }
-        ]
-      }
+      return mcpSuccess({
+        ...result,
+        has_more: hasMore(result.total, params.offset, result.sessions.length)
+      })
     } catch (error) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Error: ${error instanceof Error ? error.message : String(error)}`
-          }
-        ],
-        isError: true
-      }
+      return mcpError(error)
     }
   }
 )
@@ -342,36 +285,13 @@ server.registerTool(
   },
   async (params: z.infer<typeof GetMessagesSchema>) => {
     try {
-      const result = await getSessionMessages(
-        params.session_id,
-        params.limit,
-        params.offset
-      )
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              {
-                ...result,
-                has_more: result.total > params.offset + result.messages.length
-              },
-              null,
-              2
-            )
-          }
-        ]
-      }
+      const result = await getSessionMessages(params.session_id, params.limit, params.offset)
+      return mcpSuccess({
+        ...result,
+        has_more: hasMore(result.total, params.offset, result.messages.length)
+      })
     } catch (error) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Error: ${error instanceof Error ? error.message : String(error)}`
-          }
-        ],
-        isError: true
-      }
+      return mcpError(error)
     }
   }
 )
@@ -398,32 +318,13 @@ server.registerTool(
         offset: params.offset,
         searchThinking: params.search_thinking
       })
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(
-              {
-                query: params.query,
-                ...result,
-                has_more: result.total > params.offset + result.results.length
-              },
-              null,
-              2
-            )
-          }
-        ]
-      }
+      return mcpSuccess({
+        query: params.query,
+        ...result,
+        has_more: hasMore(result.total, params.offset, result.results.length)
+      })
     } catch (error) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Error: ${error instanceof Error ? error.message : String(error)}`
-          }
-        ],
-        isError: true
-      }
+      return mcpError(error)
     }
   }
 )
@@ -445,36 +346,20 @@ server.registerTool(
     try {
       if (params.session_id) {
         const stats = await getSessionStats(params.session_id)
-        if (!stats)
-          return {
-            content: [{ type: 'text', text: 'Session not found' }],
-            isError: true
-          }
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify({ session_id: params.session_id, ...stats }, null, 2)
-            }
-          ]
-        }
-      } else {
-        const stats = await getOverallStats()
-        return { content: [{ type: 'text', text: JSON.stringify(stats, null, 2) }] }
+        if (!stats) return mcpNotFound('Session')
+        return mcpSuccess({ session_id: params.session_id, ...stats })
       }
+      const stats = await getOverallStats()
+      return mcpSuccess(stats)
     } catch (error) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Error: ${error instanceof Error ? error.message : String(error)}`
-          }
-        ],
-        isError: true
-      }
+      return mcpError(error)
     }
   }
 )
+
+// =============================================================================
+// Server Startup
+// =============================================================================
 
 async function main() {
   const transport = new StdioServerTransport()
