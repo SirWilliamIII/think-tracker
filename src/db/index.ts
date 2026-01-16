@@ -114,12 +114,28 @@ export async function captureMessage(input: CaptureMessageInput): Promise<Messag
     role,
     content,
     thinking_content,
+    thinking_text,
+    thinking,
+    thoughts,
     thinking_tokens,
+    thinking_token_count,
+    thoughts_token_count,
     model,
     input_tokens,
     output_tokens,
     tool_calls
   } = input
+  const normalizeThinkingContent = (
+    value: string | string[] | null | undefined
+  ): string | null => {
+    if (!value) return null
+    return Array.isArray(value) ? value.filter(Boolean).join('\n') : value
+  }
+  const normalizedThinkingContent = normalizeThinkingContent(
+    thinking_content ?? thinking_text ?? thinking ?? thoughts ?? null
+  )
+  const normalizedThinkingTokens =
+    thinking_tokens ?? thinking_token_count ?? thoughts_token_count ?? 0
 
   const result = await pool.query<Message>(
     `INSERT INTO messages (
@@ -132,8 +148,8 @@ export async function captureMessage(input: CaptureMessageInput): Promise<Messag
       session_id,
       role,
       content,
-      thinking_content || null,
-      thinking_tokens || 0,
+      normalizedThinkingContent,
+      normalizedThinkingTokens,
       model || null,
       input_tokens || 0,
       output_tokens || 0,

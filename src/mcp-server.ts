@@ -35,12 +35,36 @@ const CaptureMessageSchema = z
       .describe('Role of the message sender'),
     content: z.string().describe('The message content'),
     thinking_content: z.string().optional().describe('Extended thinking content'),
+    thinking_text: z
+      .union([z.string(), z.array(z.string())])
+      .optional()
+      .describe('Alternate field for thinking text (Gemini CLI)'),
+    thinking: z
+      .union([z.string(), z.array(z.string())])
+      .optional()
+      .describe('Alternate field for thinking text (Gemini CLI)'),
+    thoughts: z
+      .union([z.string(), z.array(z.string())])
+      .optional()
+      .describe('Alternate field for thinking text (Gemini CLI)'),
     thinking_tokens: z
       .number()
       .int()
       .min(0)
       .optional()
       .describe('Tokens used in thinking'),
+    thinking_token_count: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe('Alternate field for thinking token count (Gemini CLI)'),
+    thoughts_token_count: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe('Alternate field for thinking token count (Gemini CLI)'),
     model: z.string().optional().describe('Model used'),
     input_tokens: z.number().int().min(0).optional().describe('Input tokens'),
     output_tokens: z.number().int().min(0).optional().describe('Output tokens'),
