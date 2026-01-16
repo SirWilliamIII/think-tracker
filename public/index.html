@@ -341,10 +341,12 @@
       // Dashboard
       async function loadDashboard() {
         try {
-          const [stats, sessions] = await Promise.all([
+          const [statsRes, sessionsRes] = await Promise.all([
             fetch(`${API}/analytics/overview`).then((r) => r.json()),
             fetch(`${API}/sessions?limit=5`).then((r) => r.json())
           ])
+          const stats = statsRes.stats || statsRes
+          const sessions = sessionsRes.sessions || sessionsRes
 
           document.getElementById('stats-grid').innerHTML = `
           <div class="stat-card">
@@ -407,10 +409,12 @@
 
       async function loadSessionDetail(id) {
         try {
-          const [session, messages] = await Promise.all([
+          const [sessionRes, messagesRes] = await Promise.all([
             fetch(`${API}/sessions/${id}`).then((r) => r.json()),
             fetch(`${API}/sessions/${id}/messages`).then((r) => r.json())
           ])
+          const session = sessionRes.session || sessionRes
+          const messages = messagesRes.messages || messagesRes
 
           document.getElementById('session-info').innerHTML = `
           <h2 style="color: #f0f0f0; margin-bottom: 8px;">${escapeHtml(
