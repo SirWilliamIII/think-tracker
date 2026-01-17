@@ -14,6 +14,7 @@ const __dirname = dirname(__filename)
 
 const app = express()
 const PORT = parseInt(process.env.PORT || '3000', 10)
+const HOST = process.env.HOST || '0.0.0.0'
 
 // Middleware
 app.use(cors())
@@ -63,8 +64,8 @@ async function main() {
     await initializeDatabase()
     console.log('Database initialized')
 
-    app.listen(PORT, () => {
-      console.log(`Claude Think Tracker server running at http://localhost:${PORT}`)
+    app.listen(PORT, HOST, () => {
+      console.log(`Claude Think Tracker server running at http://${HOST}:${PORT}`)
       console.log(`API endpoints:`)
       console.log(`  - GET  /api/sessions          - List sessions`)
       console.log(`  - POST /api/sessions          - Create session`)

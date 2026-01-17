@@ -79,7 +79,7 @@ export async function listSessions(
   const total = parseInt(countResult.rows[0].count, 10)
 
   const result = await pool.query<Session>(
-    `SELECT * FROM sessions
+    `SELECT * FROM session_stats
      ORDER BY started_at DESC
      LIMIT $1 OFFSET $2`,
     [limit, offset]

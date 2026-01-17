@@ -263,6 +263,12 @@
         padding: 40px;
         color: #666;
       }
+      .loading-more {
+        text-align: center;
+        padding: 20px;
+        color: #666;
+        font-size: 0.9rem;
+      }
     </style>
   </head>
   <body>
@@ -316,6 +322,14 @@
       const API = '/api'
       let currentPanel = 'dashboard'
 
+      // Pagination state
+      const PAGE_SIZE = 50
+      const paginationState = {
+        sessions: { offset: 0, total: 0, loading: false, hasMore: true },
+        messages: { offset: 0, total: 0, loading: false, hasMore: true, sessionId: null },
+        search: { offset: 0, total: 0, loading: false, hasMore: true, query: '' }
+      }
+
       // Navigation
       document.querySelectorAll('.nav button').forEach((btn) => {
         btn.addEventListener('click', () => {
@@ -325,11 +339,14 @@
       })
 
       function showPanel(panel) {
-        document.querySelectorAll('.panel').forEach((p) => p.classList.remove('active'))
-        document
-          .querySelectorAll('.nav button')
-          .forEach((b) => b.classList.remove('active'))
-        document.getElementById(`panel-${panel}`).classList.add('active')
+        document.querySelectorAll('.panel').forEach((p) => {
+          p.classList.remove('active')
+          p.style.display = 'none'
+        })
+        document.querySelectorAll('.nav button').forEach((b) => b.classList.remove('active'))
+        const targetPanel = document.getElementById(`panel-${panel}`)
+        targetPanel.classList.add('active')
+        targetPanel.style.display = 'block'
         const navBtn = document.getElementById(`nav-${panel}`)
         if (navBtn) navBtn.classList.add('active')
         currentPanel = panel
@@ -369,29 +386,58 @@
           </div>
         `
 
-          renderSessionList('recent-sessions', sessions.sessions || [])
+          renderSessionList('recent-sessions', sessions || [])
         } catch (err) {
           console.error('Failed to load dashboard:', err)
         }
       }
 
       // Sessions
-      async function loadSessions() {
+      async function loadSessions(reset = true) {
+        const state = paginationState.sessions
+        if (state.loading) return
+        if (!reset && !state.hasMore) return
+
+        const container = document.getElementById('all-sessions')
+        if (reset) {
+          state.offset = 0
+          state.hasMore = true
+          container.innerHTML = '<div class="loading">Loading...</div>'
+        } else {
+          container.insertAdjacentHTML('beforeend', '<div class="loading-more" id="sessions-loading">Loading more...</div>')
+        }
+
+        state.loading = true
         try {
-          const data = await fetch(`${API}/sessions`).then((r) => r.json())
-          renderSessionList('all-sessions', data.sessions || [])
+          const data = await fetch(`${API}/sessions?limit=${PAGE_SIZE}&offset=${state.offset}`).then((r) => r.json())
+          const sessions = data.sessions || []
+          state.total = data.total || sessions.length
+          state.hasMore = data.has_more || false
+          state.offset += sessions.length
+
+          // Remove loading indicator
+          const loadingEl = document.getElementById('sessions-loading')
+          if (loadingEl) loadingEl.remove()
+
+          renderSessionList('all-sessions', sessions, !reset)
         } catch (err) {
           console.error('Failed to load sessions:', err)
+          const loadingEl = document.getElementById('sessions-loading')
+          if (loadingEl) loadingEl.remove()
+        } finally {
+          state.loading = false
         }
       }
 
-      function renderSessionList(containerId, sessions) {
+      function renderSessionList(containerId, sessions, append = false) {
         const container = document.getElementById(containerId)
         if (!sessions || sessions.length === 0) {
-          container.innerHTML = '<div class="empty-state">No sessions found</div>'
+          if (!append) {
+            container.innerHTML = '<div class="empty-state">No sessions found</div>'
+          }
           return
         }
-        container.innerHTML = sessions
+        const html = sessions
           .map(
             (s) => `
         <div class="session-card" onclick="loadSessionDetail('${s.id}')">
@@ -405,16 +451,24 @@
       `
           )
           .join('')
+
+        if (append) {
+          container.insertAdjacentHTML('beforeend', html)
+        } else {
+          container.innerHTML = html
+        }
       }
 
       async function loadSessionDetail(id) {
+        showPanel('session-detail')
+
+        document.getElementById('session-info').innerHTML = '<div class="loading">Loading...</div>'
+        document.getElementById('session-messages').innerHTML = ''
+
         try {
-          const [sessionRes, messagesRes] = await Promise.all([
-            fetch(`${API}/sessions/${id}`).then((r) => r.json()),
-            fetch(`${API}/sessions/${id}/messages`).then((r) => r.json())
-          ])
+          // Fetch session info
+          const sessionRes = await fetch(`${API}/sessions/${id}`).then((r) => r.json())
           const session = sessionRes.session || sessionRes
-          const messages = messagesRes.messages || messagesRes
 
           document.getElementById('session-info').innerHTML = `
           <h2 style="color: #f0f0f0; margin-bottom: 8px;">${escapeHtml(
@@ -430,10 +484,80 @@
           </div>
         `
 
-          renderMessages('session-messages', messages.messages || [])
-          showPanel('session-detail')
+          // Fetch messages directly
+          const messagesRes = await fetch(`${API}/sessions/${id}/messages?limit=${PAGE_SIZE}&offset=0`).then((r) => r.json())
+          const messages = messagesRes.messages || []
+
+          // Update pagination state
+          paginationState.messages.sessionId = id
+          paginationState.messages.offset = messages.length
+          paginationState.messages.total = messagesRes.total || messages.length
+          paginationState.messages.hasMore = messagesRes.has_more || false
+          paginationState.messages.loading = false
+
+          // Render messages
+          if (messages.length === 0) {
+            document.getElementById('session-messages').innerHTML = '<div class="empty-state">No messages in this session</div>'
+          } else {
+            document.getElementById('session-messages').innerHTML = messages.map(m => `
+              <div class="message-card ${m.role}">
+                <div class="message-header">
+                  <span class="message-role">${m.role}</span>
+                  <span class="tokens">
+                    ${m.input_tokens ? `In: ${m.input_tokens}` : ''}
+                    ${m.output_tokens ? ` | Out: ${m.output_tokens}` : ''}
+                    ${m.thinking_tokens ? ` | Think: ${m.thinking_tokens}` : ''}
+                  </span>
+                </div>
+                <div class="message-content">${escapeHtml(truncate(m.content, 1000))}</div>
+                ${m.thinking_content ? `
+                  <div class="thinking-block">
+                    <h4>🧠 Extended Thinking</h4>
+                    <pre>${escapeHtml(m.thinking_content)}</pre>
+                  </div>
+                ` : ''}
+              </div>
+            `).join('')
+          }
         } catch (err) {
           console.error('Failed to load session:', err)
+          document.getElementById('session-messages').innerHTML = '<div class="empty-state">Failed to load messages</div>'
+        }
+      }
+
+      async function loadSessionMessages(reset = true) {
+        const state = paginationState.messages
+        if (state.loading) return
+        if (!reset && !state.hasMore) return
+        if (!state.sessionId) return
+
+        const container = document.getElementById('session-messages')
+        if (reset) {
+          state.offset = 0
+          state.hasMore = true
+        } else {
+          container.insertAdjacentHTML('beforeend', '<div class="loading-more" id="messages-loading">Loading more...</div>')
+        }
+
+        state.loading = true
+        try {
+          const data = await fetch(`${API}/sessions/${state.sessionId}/messages?limit=${PAGE_SIZE}&offset=${state.offset}`).then((r) => r.json())
+          const messages = data.messages || []
+          state.total = data.total || messages.length
+          state.hasMore = data.has_more || false
+          state.offset += messages.length
+
+          // Remove loading indicator
+          const loadingEl = document.getElementById('messages-loading')
+          if (loadingEl) loadingEl.remove()
+
+          renderMessages('session-messages', messages, !reset)
+        } catch (err) {
+          console.error('Failed to load messages:', err)
+          const loadingEl = document.getElementById('messages-loading')
+          if (loadingEl) loadingEl.remove()
+        } finally {
+          state.loading = false
         }
       }
 
@@ -441,14 +565,16 @@
         .getElementById('back-to-sessions')
         .addEventListener('click', () => showPanel('sessions'))
 
-      function renderMessages(containerId, messages) {
+      function renderMessages(containerId, messages, append = false) {
         const container = document.getElementById(containerId)
         if (!messages || messages.length === 0) {
-          container.innerHTML =
-            '<div class="empty-state">No messages in this session</div>'
+          if (!append) {
+            container.innerHTML =
+              '<div class="empty-state">No messages in this session</div>'
+          }
           return
         }
-        container.innerHTML = messages
+        const html = messages
           .map(
             (m) => `
         <div class="message-card ${m.role}">
@@ -494,33 +620,77 @@
       `
           )
           .join('')
+
+        if (append) {
+          container.insertAdjacentHTML('beforeend', html)
+        } else {
+          container.innerHTML = html
+        }
       }
 
       // Search
-      document.getElementById('search-btn').addEventListener('click', doSearch)
+      document.getElementById('search-btn').addEventListener('click', () => doSearch(true))
       document.getElementById('search-input').addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') doSearch()
+        if (e.key === 'Enter') doSearch(true)
       })
 
-      async function doSearch() {
+      async function doSearch(reset = true) {
         const query = document.getElementById('search-input').value.trim()
         if (query.length < 2) return
 
-        const container = document.getElementById('search-results')
-        container.innerHTML = '<div class="loading">Searching...</div>'
+        const state = paginationState.search
+        if (state.loading) return
+        if (!reset && !state.hasMore) return
 
+        // Reset state if query changed or explicit reset
+        if (reset || state.query !== query) {
+          state.offset = 0
+          state.hasMore = true
+          state.query = query
+        }
+
+        const container = document.getElementById('search-results')
+        if (reset) {
+          container.innerHTML = '<div class="loading">Searching...</div>'
+        } else {
+          container.insertAdjacentHTML('beforeend', '<div class="loading-more" id="search-loading">Loading more...</div>')
+        }
+
+        state.loading = true
         try {
           const data = await fetch(
-            `${API}/search?q=${encodeURIComponent(query)}`
+            `${API}/search?q=${encodeURIComponent(query)}&limit=${PAGE_SIZE}&offset=${state.offset}`
           ).then((r) => r.json())
           const results = data.results || []
-          if (results.length === 0) {
+          state.total = data.total || results.length
+          state.hasMore = data.has_more || false
+          state.offset += results.length
+
+          // Remove loading indicator
+          const loadingEl = document.getElementById('search-loading')
+          if (loadingEl) loadingEl.remove()
+
+          if (results.length === 0 && reset) {
             container.innerHTML = '<div class="empty-state">No results found</div>'
             return
           }
-          container.innerHTML = results
-            .map(
-              (r) => `
+          renderSearchResults(container, results, !reset)
+        } catch (err) {
+          const loadingEl = document.getElementById('search-loading')
+          if (loadingEl) loadingEl.remove()
+          if (reset) {
+            container.innerHTML = '<div class="empty-state">Search failed</div>'
+          }
+          console.error('Search error:', err)
+        } finally {
+          state.loading = false
+        }
+      }
+
+      function renderSearchResults(container, results, append = false) {
+        const html = results
+          .map(
+            (r) => `
           <div class="result-item">
             <div style="margin-bottom: 8px;">
               <span class="message-role" style="color: ${
@@ -543,11 +713,13 @@
             }
           </div>
         `
-            )
-            .join('')
-        } catch (err) {
-          container.innerHTML = '<div class="empty-state">Search failed</div>'
-          console.error('Search error:', err)
+          )
+          .join('')
+
+        if (append) {
+          container.insertAdjacentHTML('beforeend', html)
+        } else {
+          container.innerHTML = html
         }
       }
 
@@ -582,7 +754,35 @@
         return escaped.replace(regex, '<span class="highlight">$1</span>')
       }
 
-      // Initial load
+      // Infinite scroll handler
+      function setupInfiniteScroll() {
+        let ticking = false
+        window.addEventListener('scroll', () => {
+          if (!ticking) {
+            window.requestAnimationFrame(() => {
+              const scrollBottom = window.innerHeight + window.scrollY
+              const docHeight = document.documentElement.scrollHeight
+              const threshold = 200 // pixels from bottom
+
+              if (scrollBottom >= docHeight - threshold) {
+                // Determine which panel is active and load more
+                if (currentPanel === 'sessions') {
+                  loadSessions(false)
+                } else if (currentPanel === 'session-detail') {
+                  loadSessionMessages(false)
+                } else if (currentPanel === 'search' && paginationState.search.query) {
+                  doSearch(false)
+                }
+              }
+              ticking = false
+            })
+            ticking = true
+          }
+        })
+      }
+
+      // Initialize
+      setupInfiniteScroll()
       loadDashboard()
     </script>
   </body>
